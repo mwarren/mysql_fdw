@@ -1559,6 +1559,7 @@ mysqlImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	mysql_opt  *options;
 	MYSQL	   *conn;
 	StringInfoData buf;
+	StringInfoData enumBuf;
 	MYSQL_RES  *volatile res = NULL;
 	MYSQL_ROW	row;
 	ListCell   *lc;
@@ -1587,8 +1588,9 @@ mysqlImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 	options = mysql_get_options(serverOid);
 	conn = mysql_get_connection(server, user, options);
 
-	/* Create workspace for strings */
+	/* Create workspaces for strings */
 	initStringInfo(&buf);
+	initStringInfo(&enumBuf);
 
 	/* Check that the schema really exists */
 	appendStringInfo(&buf,
@@ -1717,11 +1719,12 @@ mysqlImportForeignSchema(ImportForeignSchemaStmt *stmt, Oid serverOid)
 			attnotnull = row[4];
 			attdefault = row[5] == NULL ? (char *) NULL : row[5];
 
-			if (strncmp(typedfn, "enum(", 5) == 0)
-				ereport(NOTICE,
-						(errmsg("error while generating the table definition"),
-						 errhint("If you encounter an error, you may need to execute the following first:\nDO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_type WHERE typname = '%s') THEN CREATE TYPE %s AS %s; END IF; END$$;\n",
-								 typename, typename, typedfn)));
+			if (strncmp(typedfn, "enum(", 5) == 0) {
+				appendStringInfo(&enumBuf, "CREATE TYPE %s AS %s;\n", typename, typedfn);
+				commands = lappend(commands, pstrdup(enumBuf.data));
+				ereport(NOTICE, (errmsg("creating enum: %s", enumBuf.data)));
+				resetStringInfo(&enumBuf);
+			}
 
 			if (first_item)
 				first_item = false;
